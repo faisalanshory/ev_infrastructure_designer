@@ -507,11 +507,12 @@ mod_config_server <-
       for (site_id in mapData$rvData$siteIDs) {
         rest_new_evse_query <-
           glue::glue(
-            rest_new_evse_query,
-            "(currval('analysis_record_analysis_id_seq'), {mapData$rvData$siteDetailsDF[site_id, 'trip_count']}, ",
+            rest_new_evse_query, #change currval('analysis_record_analysis_id_seq') to last_value function
+            "((SELECT last_value FROM analysis_record_analysis_id_seq), {mapData$rvData$siteDetailsDF[site_id, 'trip_count']}, ",
             "'",
             mapData$rvData$siteDetailsDF[site_id, "od_pairs"],
-            "', {mapData$rvData$siteDetailsDF[site_id, 'latitude']}, {mapData$rvData$siteDetailsDF[site_id, 'longitude']}, {input[[paste0('dcfc_plug_count', site_id)]]}, {input[[paste0('dcfc_plug_power', site_id)]]}, {input[[paste0('level2_plug_count', site_id)]]}, {input[[paste0('level2_plug_power', site_id)]]},
+            "', {mapData$rvData$siteDetailsDF[site_id, 'latitude']}, {mapData$rvData$siteDetailsDF[site_id, 'longitude']}, {input[[paste0('dcfc_plug_count', site_id)]]}, 
+            {input[[paste0('dcfc_plug_power', site_id)]]}, {input[[paste0('level2_plug_count', site_id)]]}, {input[[paste0('level2_plug_power', site_id)]]},
             {input[[paste0('fixed_charging_price_slider', site_id)]]}, '",
             input[[paste0("dd_var_charging_unit", site_id)]],
             "', {input[[paste0('var_charging_price_slider', site_id)]]}, {input[[paste0('fixed_parking_price_slider', site_id)]]}, '",
@@ -549,9 +550,9 @@ mod_config_server <-
         strsplit(auth0_sub, "|", fixed = TRUE)[[1]][2]
       
       query_analysis <-
-        glue::glue(
-          "INSERT INTO analysis_record (user_id, status, include_tesla) VALUES
-                                    ('{auth0_userid}', 'inserted', '{input$tesla_toggle}');"
+        glue::glue( #adding sim_date_time
+          "INSERT INTO analysis_record (user_id, sim_date_time, status, include_tesla) VALUES
+                                    ('{auth0_userid}', NOW(), 'inserted', '{input$tesla_toggle}');"
         )
       
       return (query_analysis)
@@ -586,8 +587,8 @@ mod_config_server <-
         for (i in 1:nrow(gParamUpdates)) {
           query_ap_rest <-
             paste0(
-              query_ap_rest,
-              "(currval('analysis_record_analysis_id_seq'), ",
+              query_ap_rest, #change currval('analysis_record_analysis_id_seq') to last_value function
+              "((SELECT last_value FROM analysis_record_analysis_id_seq), ",
               gParamUpdates$param_id[i],
               ", '",
               gParamUpdates$param_value[i],
@@ -598,8 +599,8 @@ mod_config_server <-
         for (i in 1:nrow(tParamUpdates)) {
           query_ap_rest <-
             paste0(
-              query_ap_rest,
-              "(currval('analysis_record_analysis_id_seq'), ",
+              query_ap_rest, #change currval('analysis_record_analysis_id_seq') to last_value function
+              "((SELECT last_value FROM analysis_record_analysis_id_seq), ",
               tParamUpdates$param_id[i],
               ", '",
               tParamUpdates$param_value[i],
@@ -610,8 +611,8 @@ mod_config_server <-
         for (i in 1:nrow(eParamUpdates)) {
           query_ap_rest <-
             paste0(
-              query_ap_rest,
-              " (currval('analysis_record_analysis_id_seq'), ",
+              query_ap_rest, #change currval('analysis_record_analysis_id_seq') to last_value function
+              " ((SELECT last_value FROM analysis_record_analysis_id_seq), ",
               eParamUpdates$param_id[i],
               ", '",
               eParamUpdates$param_value[i],
