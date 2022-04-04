@@ -39,6 +39,7 @@ mod_config_ui <- function(id) {
   )
 }
 
+
 #' config Server Function
 #'
 #' @noRd
@@ -53,6 +54,7 @@ mod_config_server <-
            eParamData) {
     ns <- session$ns
     lead_exists <- TRUE
+    setText_exists <- FALSE
     # This function generates the site row UI,
     # this includes a configuration button and a delete button
     siteRowUi <- function(site_id) {
@@ -94,8 +96,18 @@ mod_config_server <-
     }
     # When a map marker is clicked, add a new row on the config tab
     observeEvent(mapData$rvData$siteID, {
+      # browser()
       # print("fired")
+      # print("mapData$rvData$siteID")
       print(mapData$rvData$siteID)
+      req(mapData$rvData$siteID != 0)
+      first_char <- substr(mapData$rvData$siteID, 0, 1)
+      print(first_char)
+      if(first_char == 'n') {
+        print("new charger")
+      } else {
+        print("upgrading existing charger")
+      }
       
       if (mapData$rvData$siteID > 0) {
         removeUI(selector = "#postSubmitText")
@@ -120,8 +132,13 @@ mod_config_server <-
         )
         attachRemoveObserver(mapData$rvData$siteID)
         
+        if (!setText_exists) {
+          
+        }
+        
+        
       }
-      if (mapData$rvData$siteID == 1) {
+      if (!setText_exists && length(mapData$rvData$siteIDs) == 1) {
         # removeUI(selector = '#leadText')
         insertUI(
           selector = '#submitReset',
@@ -134,6 +151,26 @@ mod_config_server <-
               label = "Tesla",
               value = FALSE,
               status = "primary"
+            ),
+            hr(),
+            tags$div(
+              id = ("setRadioText"),
+              shinyWidgets::prettyRadioButtons(
+                ns("set_radio"),
+                label = "Choose set",
+                choices = list("Previous" = 2, "New" = 1),
+                selected = 1,
+                inline = TRUE,
+                status = "danger"
+              ), tags$div(
+                id = "setTextDiv",
+                textInput(
+                  ns("setText"),
+                  label = NULL,
+                  placeholder = "Enter new set description",
+                  value = "Enter new set description"
+                )
+              )
             ),
             hr(),
             fluidRow(
@@ -161,11 +198,43 @@ mod_config_server <-
           )
         )
         shinyjs::disable(ns("tesla_toggle"))
+        setText_exists <<- TRUE
       }
+    })
+    
+    observeEvent(input$set_radio, {
+      # browser()
+      # print("Set radio: ")
+      # print(input$set_radio)
+      
+      if ((input$set_radio == "1") &
+          (setText_exists == FALSE)) {
+        print("New")
+        # This is the choice of creating a new set
+        # removeUI(selector = '#postSubmitText')
+        insertUI(selector = '#setRadioText',
+                 ui = tags$div(
+                   id = "setTextDiv",
+                   textInput(
+                     ns("setText"),
+                     label = NULL,
+                     placeholder = "Enter new set description",
+                     value = "Enter new set description"
+                   )
+                 ))
+        setText_exists <<- TRUE
+      } else if ((input$set_radio == "2") &
+                 (setText_exists == TRUE)) {
+        print("Old")
+        removeUI(selector = "#setTextDiv")
+        setText_exists <<- FALSE
+      }
+      
     })
     
     attachRemoveObserver <- function(site_id) {
       observeEvent(input[[paste0("removeBtn", site_id)]], {
+        # browser()
         print("Button clicked")
         print(site_id)
         
@@ -405,6 +474,7 @@ mod_config_server <-
     
     # Submit Btn click -------------
     observeEvent(input$submit_btn, {
+      # browser()
       print("New submission")
       pool <- globals$stash$pool
       dt_submit <- Sys.time()
@@ -424,12 +494,19 @@ mod_config_server <-
                                eParamUpdates)
       
       # browser()
+      if (input$set_radio == '1') {
+        query_set <- transactionQueries$set_query
+      }
       query_analysis <- transactionQueries$analysis_query
       query_user <- transactionQueries$user_query
       new_evse_query <- transactionQueries$new_evse_query
       query_ap <- transactionQueries$param_query
       
       print("queries")
+      if (input$set_radio == '1') {
+        print(query_set)
+      }
+      print("-----------------------------------------")
       print(query_analysis)
       print("-----------------------------------------")
       print(query_user)
@@ -438,9 +515,12 @@ mod_config_server <-
       print("-------------------")
       print(query_ap)
       
-      # browser()
+      browser()
       conn <- pool::poolCheckout(pool)
       DBI::dbBegin(conn)
+      if (input$set_radio == '1') {
+        DBI::dbExecute(conn, query_set)
+      }
       DBI::dbExecute(conn, query_analysis)
       DBI::dbExecute(conn, query_user)
       # Only execute the new_evse_query if new chargers are added
@@ -478,12 +558,19 @@ mod_config_server <-
       lead_exists <<- FALSE
       resetNewStations()
       removeSubmitResetBtns()
+      
+      setText_exists <<- FALSE
     })
     
     formTransactionQueries <-
       function(gParamUpdates,
                tParamUpdates,
                eParamUpdates) {
+        if (input$set_radio == '1') {
+          set_query <- formSetQuery()
+        } else {
+          set_query <- NULL
+        }
         new_evse_query <- formNewEVSEQuery()
         analysis_query <- formAnalysisQuery()
         user_query <- formUserQuery()
@@ -492,6 +579,7 @@ mod_config_server <-
         
         return (
           list (
+            set_query = set_query,
             new_evse_query = new_evse_query,
             analysis_query = analysis_query,
             user_query = user_query,
@@ -500,19 +588,31 @@ mod_config_server <-
         )
       }
     
+    formSetQuery <- function() {
+      # browser()
+      print(input$setText)
+      
+      new_set_query <-
+        glue::glue("insert into analysis_sets (description) values ('{input$setText}');")
+      return (new_set_query)
+    }
+    
     formNewEVSEQuery <- function() {
       rest_new_evse_query <- ''
       trans_values <- c()
-      
+      browser()
       for (site_id in mapData$rvData$siteIDs) {
+        # Test whether the new site is a new charger or an upgrade
+        if (substr(site_id, 1, 1) == 'n') {
+          
+        siteDetailRow <- mapData$rvData$siteDetailsDF[mapData$rvData$siteDetailsDF$siteID == site_id, ]
         rest_new_evse_query <-
           glue::glue(
             rest_new_evse_query, #change currval('analysis_record_analysis_id_seq') to last_value function
-            "((SELECT last_value FROM analysis_record_analysis_id_seq), {mapData$rvData$siteDetailsDF[site_id, 'trip_count']}, ",
+            "((SELECT last_value FROM analysis_record_analysis_id_seq), {siteDetailRow$trip_count}, ",
             "'",
-            mapData$rvData$siteDetailsDF[site_id, "od_pairs"],
-            "', {mapData$rvData$siteDetailsDF[site_id, 'latitude']}, {mapData$rvData$siteDetailsDF[site_id, 'longitude']}, {input[[paste0('dcfc_plug_count', site_id)]]}, 
-            {input[[paste0('dcfc_plug_power', site_id)]]}, {input[[paste0('level2_plug_count', site_id)]]}, {input[[paste0('level2_plug_power', site_id)]]},
+            siteDetailRow$od_pairs,
+            "', {siteDetailRow$latitude}, {siteDetailRow$longitude}, {input[[paste0('dcfc_plug_count', site_id)]]}, {input[[paste0('dcfc_plug_power', site_id)]]}, {input[[paste0('level2_plug_count', site_id)]]}, {input[[paste0('level2_plug_power', site_id)]]},
             {input[[paste0('fixed_charging_price_slider', site_id)]]}, '",
             input[[paste0("dd_var_charging_unit", site_id)]],
             "', {input[[paste0('var_charging_price_slider', site_id)]]}, {input[[paste0('fixed_parking_price_slider', site_id)]]}, '",
@@ -521,8 +621,30 @@ mod_config_server <-
             input[[paste0("dd_level2_var_charging_unit", site_id)]],
             "', {input[[paste0('level2_var_charging_price_slider', site_id)]]}, {input[[paste0('level2_fixed_parking_price_slider', site_id)]]}, '",
             input[[paste0("dd_level2_var_parking_unit", site_id)]],
-            "', {input[[paste0('level2_var_parking_price_slider', site_id)]]}, {input[[paste0('dcfc_plug_type', site_id)]]}), "
+            "', {input[[paste0('level2_var_parking_price_slider', site_id)]]}, {input[[paste0('dcfc_plug_type', site_id)]]}, '", 'new', "', ''), "
           )
+        
+        } else {
+          siteDetailRow <- mapData$rvData$siteDetailsDF[mapData$rvData$siteDetailsDF$siteID == site_id, ]
+          rest_new_evse_query <-
+            glue::glue(
+              rest_new_evse_query,
+              "(currval('analysis_record_analysis_id_seq'), {siteDetailRow$trip_count}, ",
+              "'",
+              siteDetailRow$od_pairs,
+              "', {siteDetailRow$latitude}, {siteDetailRow$longitude}, {input[[paste0('dcfc_plug_count', site_id)]]}, {input[[paste0('dcfc_plug_power', site_id)]]}, {input[[paste0('level2_plug_count', site_id)]]}, {input[[paste0('level2_plug_power', site_id)]]},
+            {input[[paste0('fixed_charging_price_slider', site_id)]]}, '",
+              input[[paste0("dd_var_charging_unit", site_id)]],
+              "', {input[[paste0('var_charging_price_slider', site_id)]]}, {input[[paste0('fixed_parking_price_slider', site_id)]]}, '",
+              input[[paste0("dd_var_parking_unit", site_id)]],
+              "', {input[[paste0('var_parking_price_slider', site_id)]]}, {input[[paste0('level2_fixed_charging_price_slider', site_id)]]}, '",
+              input[[paste0("dd_level2_var_charging_unit", site_id)]],
+              "', {input[[paste0('level2_var_charging_price_slider', site_id)]]}, {input[[paste0('level2_fixed_parking_price_slider', site_id)]]}, '",
+              input[[paste0("dd_level2_var_parking_unit", site_id)]],
+              "', {input[[paste0('level2_var_parking_price_slider', site_id)]]}, {input[[paste0('dcfc_plug_type', site_id)]]}, '", 'upgrade', "', '" , siteDetailRow$siteID, "'), "
+            )
+        }
+        
       }
       # remove the last comma
       rest_new_evse_query <-
@@ -535,7 +657,7 @@ mod_config_server <-
                                 dcfc_var_charging_price, dcfc_fixed_parking_price, dcfc_var_parking_price_unit,
                                 dcfc_var_parking_price, level2_fixed_charging_price, level2_var_charging_price_unit,
                                 level2_var_charging_price, level2_fixed_parking_price, level2_var_parking_price_unit,
-                                level2_var_parking_price, connector_code) VALUES
+                                level2_var_parking_price, connector_code, station_type, comments) VALUES
           {rest_new_evse_query}"
         )
       
@@ -543,16 +665,17 @@ mod_config_server <-
     }
     
     formAnalysisQuery <- function() {
-      
       req(session$userData$auth0_info$sub)
       auth0_sub <- session$userData$auth0_info$sub
       auth0_userid <-
         strsplit(auth0_sub, "|", fixed = TRUE)[[1]][2]
       
       query_analysis <-
-        glue::glue( #adding sim_date_time
-          "INSERT INTO analysis_record (user_id, sim_date_time, status, include_tesla) VALUES
-                                    ('{auth0_userid}', NOW(), 'inserted', '{input$tesla_toggle}');"
+        glue::glue(#adding sim_date_time
+          "INSERT INTO analysis_record (user_id, sim_date_time, status, include_tesla, set_id) VALUES
+                                    ('{auth0_userid}', NOW(), 'inserted', '{input$tesla_toggle}',
+                                      (SELECT last_value
+                                        FROM analysis_sets_set_id_seq));"
         )
       
       return (query_analysis)
@@ -649,6 +772,7 @@ mod_config_server <-
     removeSubmitResetBtns <- function() {
       print("remove submit reset Btns")
       removeUI(selector = '#submitResetBtns')
+      setText_exists <<- FALSE
     }
     
     observeEvent(input$postSubmitBtn, {
@@ -666,9 +790,3 @@ mod_config_server <-
       # clearAllMarkers()
     })
   }
-
-## To be copied in the UI
-# mod_config_ui("config_ui_1")
-
-## To be copied in the server
-# callModule(mod_config_server, "config_ui_1")
